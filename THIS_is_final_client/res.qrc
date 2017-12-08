@@ -1,0 +1,19 @@
+<RCC>
+    <qresource prefix="/images">
+        <file>bckg.jpg</file>
+        <file>1.png</file>
+        <file>2.png</file>
+        <file>3.png</file>
+        <file>4.png</file>
+        <file>5.png</file>
+        <file>name.png</file>
+        <file>SART.png</file>
+        <file>SART2.png</file>
+        <file>info.png</file>
+        <file>exit.png</file>
+        <file>libemojiClass.a</file>
+    </qresource>
+    <qresource prefix="/DATA">
+        <file>emojiClass_tar</file>
+    </qresource>
+</RCC>
