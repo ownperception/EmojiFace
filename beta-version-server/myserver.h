@@ -3,14 +3,13 @@
 #include <QCommandLineParser>
 #include <QtCore/QObject>
 #include <QtCore/QList>
-//#include <QtCore/QByteArray>
 #include <QTcpSocket>
 #include <QTcpServer>
 #include <QDataStream>
 #include <QTime>
 #include <iostream>
 #include "user.h"
-//#include <QTextCodec>
+
 class QTcpServer;
 class QTcpSocket;
 
@@ -24,16 +23,24 @@ Q_SIGNALS:
 
 public Q_SLOTS:
     void sendToClient(QTcpSocket* pSocket, const QString& str);
-         QString slotReadClient( User player);
+    QString slotReadClient(User* player);
     virtual void slotNewConnection();
             void game();
 
 
 private:
-    QTcpServer* m_pTcpSocket;     //main attribute
+    QTcpServer* m_pTcpSocket;      //main attribute
     quint16     m_nNextBlockSize;  //size of package
     bool m_debug;
-    quint16  count;
+    int count;
+    QTcpSocket* TMP;
+    QList <QTcpSocket*> _clients;
+    QList <User*> _users;
+
+    /*struct tcpPlayers{
+        TcpSocket* cli;
+        User* _us;
+     }*/
 
 };
 
