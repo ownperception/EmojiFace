@@ -5,9 +5,6 @@
 #include <dlib/image_io.h>
 #include <dlib/opencv.h>
 
-#include "./DATA/NN/NeuralNetworkTrainer.h"
-#include "./DATA/NN/TrainingDataReader.h"
-
 #include "opencv2/objdetect.hpp"
 #include "opencv2/videoio.hpp"
 #include "opencv2/highgui.hpp"
@@ -16,6 +13,12 @@
 #include <iostream>
 #include <string>
 #include <cmath>
+#include <exception>
+#include <python3.5/Python.h>
+#include <typeinfo>
+#include "numpy/arrayobject.h"
+#define NPY_NO_DEPRECATED_API NPY_1_7_API_VERSION
+
 using namespace cv;
 using namespace dlib;
 using namespace std;
@@ -23,7 +26,18 @@ using namespace std;
 class emojiClass
 {
   public:
+    typedef struct emoji_struct
+    {
+        double no;
+        double happy;
+        double sad;
+        double angry;
+        double surprised;
+        bool is_error;
+    };
+
     emojiClass() {}
+    ~emojiClass() { Py_Finalize(); }
     int Init(string face_cascade_name = "../DATA/haarcascade_frontalface_alt.xml", string shape_predictor_name = "../DATA/shape_predictor_68_face_landmarks.dat")
     {
         // Load the cascades
@@ -34,114 +48,15 @@ class emojiClass
             return -1;
         };
 
+        Py_Initialize();
+        _import_array();
+        PyImport_ImportModule("sklearn");
+        PyRun_SimpleString("from sklearn import svm");
+        PyRun_SimpleString("from sklearn.externals import joblib");
+        PyRun_SimpleString("import numpy as np");
+
         return 0;
     };
-
-    BPN::Network InitNetwork(uint32_t const numInputs,
-                             uint32_t const numHidden,
-                             uint32_t const numOutputs)
-    {
-        try
-        {
-
-            // Create neural network
-            BPN::Network::Settings networkSettings{numInputs, numHidden, numOutputs};
-
-            std::vector<double> weights;
-            if (!LoadWeights(weights))
-            {
-                BPN::Network nn(networkSettings, weights);
-                return nn;
-            }
-            else
-            {
-                BPN::Network nn(networkSettings);
-                return nn;
-            }
-        }
-        catch (exception &e)
-        {
-            cout << e.what() << endl;
-        }
-    }
-
-    BPN::NetworkTrainer InitNetworkTrainer(BPN::Network &nn, uint32_t const numInputs,
-                                           uint32_t const numHidden,
-                                           uint32_t const numOutputs, int maxEpochs = 200, double learningRate = 0.01, double momentum = 0.9)
-    {
-        try
-        {
-            // Create neural network trainer
-            BPN::NetworkTrainer::Settings trainerSettings;
-            trainerSettings.m_learningRate = learningRate;
-            trainerSettings.m_momentum = momentum;
-            trainerSettings.m_useBatchLearning = true;
-            trainerSettings.m_maxEpochs = maxEpochs;
-            trainerSettings.m_desiredAccuracy = 98;
-
-            BPN::NetworkTrainer trainer(trainerSettings, &nn);
-            return trainer;
-        }
-        catch (exception &e)
-        {
-            cout << e.what() << endl;
-        }
-    }
-
-    int TrainNetwork(BPN::NetworkTrainer &trainer, BPN::Network &nn, std::string trainingDataPath,
-                     uint32_t const numInputs,
-                     uint32_t const numOutputs)
-    {
-        try
-        {
-            BPN::TrainingDataReader dataReader(trainingDataPath, numInputs, numOutputs);
-            if (!dataReader.ReadData())
-            {
-                return 1;
-            }
-
-            trainer.Train(dataReader.GetTrainingData());
-        }
-        catch (exception &e)
-        {
-            cout << e.what() << endl;
-        }
-        return 0;
-    }
-
-    int SaveWeights(BPN::Network &nn)
-    {
-        std::vector<double> IHweights = nn.GetInputHiddenWeights();
-        std::vector<double> HOweights = nn.GetHiddenOutputWeights();
-        std::vector<double> weights;
-        for (int i = 0; i < IHweights.size(); i++)
-            weights.push_back(IHweights[i]);
-        for (int i = 0; i < HOweights.size(); i++)
-            weights.push_back(HOweights[i]);
-        if (write_d("../DATA/weights.csv", weights))
-            return -1;
-        return 0;
-    }
-
-    int LoadWeights(std::vector<double> &v)
-    { /*
-        std::vector<double> IHweights = nn.GetInputHiddenWeights();
-        std::vector<double> HOweights = nn.GetHiddenOutputWeights();
-        std::vector<double> weights;
-        for (int i = 0; i < IHweights.size(); i++)
-            weights.push_back(IHweights[i]);
-        for (int i = 0; i < HOweights.size(); i++)
-            weights.push_back(HOweights[i]);
-        if (write_d("weights.csv", weights))
-            return -1;
-        return 1;*/
-        return -1;
-    }
-
-    std::vector<double> Evaluate(BPN::Network &nn, std::vector<double> vec)
-    {
-        return nn.Evaluate(vec);
-    }
 
     std::vector<double> get_training_set(Mat frame)
     {
@@ -175,22 +90,7 @@ class emojiClass
         win1.add_overlay(render_face_detections(shape));
         cvWaitKey(1000);
     }
-    /*
-//old
-    int write_training_set(std::vector<double> vshape, string path, int type)
-    {
-        for (int i = 0; i < 5; i++)
-        {
-            if (i == type)
-                vshape.push_back(1);
-            else
-                vshape.push_back(0);
-        }
-        if (write_d(path, vshape))
-            return -1;
-        return 0;
-    }
-    */
+
     int write_training_set(std::vector<double> vshape, string path, int type)
     {
         vshape.push_back(type);
@@ -198,8 +98,8 @@ class emojiClass
             return -1;
         return 0;
     }
-    
-    int detect_emotion(BPN::Network &nn, Mat cv_frame)
+
+    typename emojiClass::emoji_struct detect_emotion(Mat cv_frame)
     {
         cout << "-- detecting faces..." << endl;
         std::vector<Rect> cv_faces = detectFaces(cv_frame);
@@ -209,12 +109,12 @@ class emojiClass
         full_object_detection shape = detectShape(small_frame);
 
         std::vector<Point2d> vshape = shape_toVec(shape);
-        //if (normalize(vshape, small_frame.cols, small_frame.rows) == -1)
-        //   throw "zero division";
 
         std::vector<double> vec = important_value(vshape);
 
-        return 0;//evaluate_emotion(nn, vec);
+        evaluate_emotion(vec);
+
+        return emotion;
     }
 
     std::vector<Rect> detectFaces(Mat frame)
@@ -240,60 +140,12 @@ class emojiClass
         return shape;
     }
 
-    /*
-    typedef struct emojy_struct
-    {
-        double happy;
-        double sad;
-        double noem;
-        int if_error;
-    };
-
-    emojy_struct get_emotion()
+    emoji_struct get_emotion()
     {
         return emotion;
-    }*/
-    /*
-    std::vector<Point2d> read_shape(string path)
-    {
-        streampos begin, end;
-        std::ifstream in_file(path, std::ofstream::in);
+    }
 
-        //check is opened
-        if (!in_file.is_open())
-            throw - 1;
-
-        //calc sizeof file
-        begin = in_file.tellg();
-        in_file.seekg(0, ios::end);
-        end = in_file.tellg();
-        int size = (end - begin) / sizeof(double);
-
-        //set begining
-        in_file.seekg(0, ios::beg);
-
-        std::vector<Point2d> vshape;
-        for (int i = 0; i < size / 2; i++)
-        {
-            double x, y;
-            string del;
-            in_file >> setw(sizeof(double)) >> x;
-            in_file >> setw(sizeof(",")) >> del;
-            in_file >> setw(sizeof(double)) >> y;
-            if (i != (size / 2) - 1)
-                in_file >> setw(sizeof(",")) >> del;
-            vshape.push_back(Point2d(x, y));
-        }
-
-        in_file.close();
-        cout << "file: " << path << " loaded" << endl;
-        cout << "size_file " << size << endl;
-        cout << "NumPoints " << size / 2 << endl;
-        return vshape;
-    }*/
-
-    /*
-    int write_training_shape(std::vector<Point2d> vshape, string path,int type)
+    int write_training_shape(std::vector<Point2d> vshape, string path, int type)
     {
         std::ofstream out_file(path, std::ios::app | std::ofstream::out);
         if (!out_file.is_open())
@@ -313,38 +165,137 @@ class emojiClass
             out_file << setw(sizeof(double)) << vshape[i].y;
             out_file << ",";
         }
-        out_file<<type;
-        out_file<<"/n";
+        out_file << type;
+        out_file << "/n";
 
         out_file.close();
         return 0;
-    }*/
+    }
 
   private:
-    //emojy_struct emotion;
+    emojiClass::emoji_struct emotion;
     shape_predictor sp;
     CascadeClassifier face_cascade;
-    // BPN::Network nn;
-/*
-    int evaluate_emotion(BPN::Network &nn, std::vector<double> vec)
+
+    int evaluate_emotion(std::vector<double> vec)
     {
-        try
-        {
-            std::vector<double> res = Evaluate(nn, vec);
-            for (int i = 0; i < res.size(); i++)
-                cout << i << ": " << res[i] << endl;
-        }
-        catch (exception &e)
-        {
-            cout << e.what() << endl;
-        }
-        catch (...)
-        {
+        std::vector<double> res = Evaluate(vec);
+        if (res.size() != 6)
             return -1;
-        }
+        else if (emotion.is_error = res[5])
+            return -1;
+        emotion.no = res[0];
+        emotion.happy = res[1];
+        emotion.sad = res[2];
+        emotion.angry = res[3];
+        emotion.surprised = res[4];
+        emotion.is_error = res[5];
+
         return 0;
     }
-*/
+
+    std::vector<double> Evaluate(std::vector<double> vec)
+    {
+        double *arr = &vec[0];
+
+        string file_path("pypredictor");
+        string func_name("predict");
+
+        npy_intp dims = vec.size();
+        void *v = reinterpret_cast<void *>(arr);
+        try
+        {
+            if (!v)
+                throw 0;
+
+            // _import_array();
+            PyObject *pArray = PyArray_SimpleNewFromData(1, &dims, NPY_DOUBLE, arr);
+            if (!pArray)
+                throw 1;
+
+            wchar_t WBuf[7];
+            mbstowcs(WBuf, "../DATA", 7);
+
+            PySys_SetPath(WBuf);
+
+            PyObject *pModule = PyImport_ImportModule(file_path.c_str());
+            if (pModule)
+            {
+                PyObject *pFunc = PyObject_GetAttrString(pModule, func_name.c_str());
+                if (pFunc && PyCallable_Check(pFunc))
+                {
+                    PyObject *pReturn = PyObject_CallFunctionObjArgs(pFunc, pArray, NULL);
+                    if (!pReturn || !PyArray_Check(pReturn))
+                    {
+                        Py_DECREF(pArray);
+                        Py_DECREF(pModule);
+                        Py_XDECREF(pFunc);
+                        throw 4;
+                    }
+
+                    PyArrayObject *np_ret = reinterpret_cast<PyArrayObject *>(pReturn);
+                    if (!np_ret || PyArray_NDIM(np_ret) != 1)
+                    {
+                        Py_DECREF(pArray);
+                        Py_DECREF(pModule);
+                        Py_XDECREF(pFunc);
+                        Py_DECREF(pReturn);
+                        throw 0;
+                    }
+
+                    int len = PyArray_SHAPE(np_ret)[0];
+                    double *res = reinterpret_cast<double *>(PyArray_DATA(np_ret));
+
+                    std::vector<double> vres;
+                    for (int i = 0; i < len; i++)
+                    {
+                        vres.push_back(res[i]);
+                    }
+                    vres.push_back(0);
+                    return vres;
+                }
+                else
+                {
+                    Py_DECREF(pArray);
+                    Py_DECREF(pModule);
+                    throw 3;
+                }
+            }
+            else
+            {
+                Py_DECREF(pArray);
+                throw 2;
+            }
+        }
+        catch (int c)
+        {
+            switch (c)
+            {
+            case 0:
+                cout << "--error cast" << endl;
+                break;
+            case 1:
+                cout << "--error array conv" << endl;
+                break;
+            case 2:
+                PyErr_Print();
+                std::cout << "Failed to load " << file_path << endl
+                          << std::strerror(errno) << endl;
+                break;
+            case 3:
+                cout << "--error func in pyfile 'predict.py'!" << endl;
+                break;
+            case 4:
+                cout << "--error return array" << endl;
+                break;
+            case 5:
+
+                break;
+            }
+        }
+        return std::vector<double>{0, 0, 0, 0, 0, 1};
+    }
+
     std::vector<double> important_value(std::vector<Point2d> vshape)
     {
         //significant vertex
@@ -430,81 +381,4 @@ class emojiClass
         }
         return vshape;
     }
-
-    int normalize(std::vector<Point2d> &sv, int width, int height)
-    {
-        if (width != 0 && height != 0)
-        {
-            for (int i = 0; i < sv.size(); i++)
-            {
-                sv[i].x /= width;
-                sv[i].y /= height;
-            }
-            return 0;
-        }
-        return -1;
-    }
-
-    /*
-    double cmp_vec(std::vector<Point2d> v1, std::vector<Point2d> v2)
-    {
-        if (v1.size() != v2.size() || v1.size() < 17)
-            throw "vec size";
-
-        double rb = 0;
-        for (int i = 17; i < 22; i++)
-        {
-            rb += distance(v1[i], v2[i]);
-        }
-        ///////////////
-        cout << "right eyebrow dist: " << rb << endl;
-        //////////////////
-
-        double leb = 0;
-        for (int i = 22; i < 27; i++)
-        {
-            leb += distance(v1[i], v2[i]);
-        }
-        ///////////////
-        cout << "left eyebrow dist: " << leb << endl;
-        //////////////////
-
-        double reye = 0;
-        for (int i = 36; i < 42; i++)
-        {
-            reye += distance(v1[i], v2[i]);
-        }
-        ///////////////
-        cout << "right eye dist: " << reye << endl;
-        //////////////////
-
-        double leye = 0;
-        for (int i = 42; i < 48; i++)
-        {
-            leye += distance(v1[i], v2[i]);
-        }
-        ///////////////
-        cout << "left eye dist: " << leye << endl;
-        //////////////////
-
-        double om = 0;
-        for (int i = 48; i < 61; i++)
-        {
-            om += distance(v1[i], v2[i]);
-        }
-        ///////////////
-        cout << "outmouth dist: " << om << endl;
-        //////////////////
-
-        double im = 0;
-        for (int i = 61; i < 68; i++)
-        {
-            im += distance(v1[i], v2[i]);
-        }
-        ///////////////
-        cout << "innermouth dist: " << im << endl;
-        //////////////////
-
-        return (rb + leb + reye + leye + om + im);
-    }*/
 };
